@@ -83,7 +83,7 @@
           .where('sellerId', '==', user.uid)
           .get();
 
-        // Hide spinner regardless of result
+        // Hide spinnerloadMyListings regardless of result
         document.getElementById('loadingSpinner').classList.add('d-none');
 
         if (snap.empty) {

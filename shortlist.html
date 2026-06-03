@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campus Marketplace – My Shortlist</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+</head>
+
+<!--
+  shortlist.html – Page 5: My Shortlist
+  - Auth-guarded
+  - Reads from shortlists/{uid}/items/ in Firestore
+  - Displays item name + a "Remove" button per item
+  - Removing an item deletes it from Firestore and removes it from
+    the DOM immediately (no page refresh needed)
+  - Shortlist is per-user and persists across sessions
+-->
+
+<body class="bg-light">
+
+  <!-- ── Navbar ─────────────────────────────────────────── -->
+  <nav class="navbar navbar-dark bg-dark px-4">
+    <a class="navbar-brand fw-bold text-white text-decoration-none" href="index.html">
+      🎓 Campus Marketplace
+    </a>
+    <div>
+      <a href="index.html" class="btn btn-outline-light btn-sm me-2">← Home</a>
+      <button id="signOutBtn" class="btn btn-outline-light btn-sm">Sign Out</button>
+    </div>
+  </nav>
+
+  <!-- ── Main content ───────────────────────────────────── -->
+  <div class="container mt-4 mb-5">
+
+    <h2 class="fw-bold mb-1">My Shortlist</h2>
+    <p class="text-muted mb-4">Items you've saved from the marketplace</p>
+
+    <!-- Loading spinner -->
+    <div id="loadingSpinner" class="text-center my-5">
+      <div class="spinner-border text-danger" role="status">
+        <span class="visually-hidden">Loading…</span>
+      </div>
+      <p class="mt-2 text-muted">Loading your shortlist…</p>
+    </div>
+
+    <!-- Empty state -->
+    <div id="emptyState" class="text-center my-5 d-none">
+      <p class="text-muted fs-5">
+        Your shortlist is empty.
+        <a href="marketplace.html">Browse the marketplace</a> to add items.
+      </p>
+    </div>
+
+    <!-- Shortlist — displayed as a Bootstrap list group -->
+    <div id="shortlistContainer" class="d-none" style="max-width: 640px;"></div>
+
+  </div>
+
+  <!-- ── Firebase SDKs ──────────────────────────────────── -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+
+  <script>
+    let currentUser = null;
+
+    // ── Auth guard ───────────────────────────────────────────
+    auth.onAuthStateChanged(async user => {
+      if (!user) {
+        window.location.href = 'login.html';
+        return;
+      }
+      currentUser = user;
+      await loadShortlist();
+    });
+
+    // ── Sign out ─────────────────────────────────────────────
+    document.getElementById('signOutBtn').addEventListener('click', () => {
+      auth.signOut().then(() => window.location.href = 'login.html');
+    });
+
+    // ── Load shortlist ───────────────────────────────────────
+    async function loadShortlist() {
+      try {
+        // Each document ID in this sub-collection is the item's ID.
+        // The document stores { itemId, itemName, addedAt }.
+        const snap = await db
+          .collection('shortlists')
+          .doc(currentUser.uid)
+          .collection('items')
+          .orderBy('addedAt', 'asc') // Show oldest first
+          .get();
+
+        document.getElementById('loadingSpinner').classList.add('d-none');
+
+        if (snap.empty) {
+          document.getElementById('emptyState').classList.remove('d-none');
+          return;
+        }
+
+        // Build a list group inside the container
+        const container = document.getElementById('shortlistContainer');
+        container.classList.remove('d-none');
+
+        const listGroup = document.createElement('ul');
+        listGroup.className = 'list-group shadow-sm';
+        listGroup.id = 'shortlistGroup';
+
+        snap.forEach(doc => {
+          const { itemId, itemName } = doc.data();
+          listGroup.appendChild(buildListItem(itemId, itemName));
+        });
+
+        container.appendChild(listGroup);
+
+      } catch (err) {
+        console.error('Error loading shortlist:', err);
+        document.getElementById('loadingSpinner').classList.add('d-none');
+        const emptyEl = document.getElementById('emptyState');
+        emptyEl.textContent = 'Error loading shortlist. Please refresh.';
+        emptyEl.classList.remove('d-none');
+      }
+    }
+
+    // ── Build a single list-group <li> element ───────────────
+    function buildListItem(itemId, itemName) {
+      const li = document.createElement('li');
+      li.className = 'list-group-item d-flex justify-content-between align-items-center';
+      li.id = `shortlist-row-${itemId}`;
+      li.innerHTML = `
+        <span class="fw-medium">${itemName}</span>
+        <button
+          class="btn btn-outline-danger btn-sm"
+          onclick="removeItem('${itemId}')"
+        >Remove</button>
+      `;
+      return li;
+    }
+
+    // ── Remove an item from the shortlist ────────────────────
+    // Deletes the Firestore document and removes the row from the DOM.
+    async function removeItem(itemId) {
+      const btn = document.querySelector(`#shortlist-row-${itemId} button`);
+      if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
+
+      try {
+        // Delete from Firestore
+        await db
+          .collection('shortlists')
+          .doc(currentUser.uid)
+          .collection('items')
+          .doc(itemId)
+          .delete();
+
+        // Remove the row from the DOM
+        const row = document.getElementById(`shortlist-row-${itemId}`);
+        if (row) row.remove();
+
+        // If the list is now empty, show the empty state
+        const listGroup = document.getElementById('shortlistGroup');
+        if (listGroup && listGroup.children.length === 0) {
+          document.getElementById('shortlistContainer').classList.add('d-none');
+          document.getElementById('emptyState').classList.remove('d-none');
+        }
+
+      } catch (err) {
+        console.error('Error removing item:', err);
+        if (btn) { btn.disabled = false; btn.textContent = 'Remove'; }
+        alert('Could not remove item. Please try again.');
+      }
+    }
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
